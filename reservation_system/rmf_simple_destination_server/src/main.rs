@@ -1,4 +1,4 @@
-use rclrs::{Context, CreateBasicExecutor, SpinOptions};
+use rclrs::{Context, CreateBasicExecutor, SpinOptions, IntoPrimitiveOptions};
 use rmf_prototype_msgs::msg::{
     Destination, DestinationConstraints, DestinationError, DestinationGoal, Error, Region,
     TargetRegion,
@@ -222,11 +222,12 @@ impl CurrentlyOccupiedDestinations {
         constraints: &[DomainDestinationConstraints],
         session: &SessionUUID,
     ) -> Result<DomainDestinationConstraints, ReservationError> {
+        let old_uuid = self.agent_to_session.get(agent);
         let mut allocated_id = None;
         for (id, c) in constraints.iter().enumerate() {
             // check all  regions are free
             let all_free = c.regions.iter().all(|target_region| {
-                self.check_if_region_free(&target_region.region)
+                self.check_if_region_free(&target_region.region, old_uuid)
                     .unwrap_or(false)
             });
 
@@ -344,7 +345,11 @@ impl CurrentlyOccupiedDestinations {
         Some((start_x, end_x, start_y, end_y))
     }
 
-    fn check_if_region_free(&self, region: &DomainRegion) -> Result<bool, ShapeErr> {
+    fn check_if_region_free(
+        &self,
+        region: &DomainRegion,
+        ignore_session: Option<&SessionUUID>,
+    ) -> Result<bool, ShapeErr> {
         let bounds = self.get_region_grid_bounds(region);
         let Some((start_x, end_x, start_y, end_y)) = bounds else {
             // If we can't get bounds (invalid points or negative), we treat it as an error
@@ -366,8 +371,10 @@ impl CurrentlyOccupiedDestinations {
             if let Some(row) = self.floor_space.get(y_idx) {
                 for x_idx in start_x..=end_x {
                     if let Some(cell) = row.get(x_idx) {
-                        if cell.is_some() {
-                            return Ok(false);
+                        if let Some(occupying_session) = cell {
+                            if Some(occupying_session) != ignore_session {
+                                return Ok(false);
+                            }
                         }
                     }
                 }
@@ -492,9 +499,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     robot_id
                 );
 
+                let destination_topic = format!("{}/destination", robot_id);
                 let goal_publisher = match server
                     .node
-                    .create_publisher::<Destination>(&(robot_id.to_string() + "/destination"))
+                    .create_publisher::<Destination>(destination_topic.as_str().transient_local().reliable())
                 {
                     Ok(pub_) => pub_,
                     Err(err) => {
@@ -527,10 +535,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let error_pub_clone = error_publisher.clone();
                 let robot_id_clone = robot_id.to_string();
 
+                let goal_topic = format!("{}/destination/goal", robot_id);
                 // Create the goal subscription on the destinations_worker thread context!
                 let subscription = match server.destinations_worker
                     .create_subscription::<DestinationGoal, _>(
-                        &(robot_id.to_string() + "/destination/goal"),
+                        goal_topic.as_str(),
                         move |dest_server: &mut DestinationsServer, goal_msg: DestinationGoal| {
                             let domain_goal = DomainDestinationGoal::from_ros(&goal_msg);
                             rclrs::log!(
@@ -616,9 +625,9 @@ mod tests {
             points: vec![0.0, 0.0, 2.0, 2.0],
         };
 
-        assert!(od.check_if_region_free(&region).unwrap());
+        assert!(od.check_if_region_free(&region, None).unwrap());
         od.mark_region(&session, &region);
-        assert!(!od.check_if_region_free(&region).unwrap());
+        assert!(!od.check_if_region_free(&region, None).unwrap());
 
         // Check if book-keeping works
         assert!(od.session_to_location.contains_key(&session));
@@ -635,10 +644,10 @@ mod tests {
         };
 
         od.mark_region(&session, &region);
-        assert!(!od.check_if_region_free(&region).unwrap());
+        assert!(!od.check_if_region_free(&region, None).unwrap());
 
         od.clear_old_uuid(&session);
-        assert!(od.check_if_region_free(&region).unwrap());
+        assert!(od.check_if_region_free(&region, None).unwrap());
         assert!(!od.session_to_location.contains_key(&session));
     }
 
@@ -676,7 +685,7 @@ mod tests {
         assert_eq!(res.unwrap(), constraints[0]);
         assert_eq!(od.agent_to_session.get(agent), Some(&session1));
         assert!(!od
-            .check_if_region_free(&constraints[0].regions[0].region)
+            .check_if_region_free(&constraints[0].regions[0].region, None)
             .unwrap());
 
         // Reserve second option (should clear first)
@@ -685,10 +694,10 @@ mod tests {
         assert_eq!(res.unwrap(), constraints[1]);
         assert_eq!(od.agent_to_session.get(agent), Some(&session2));
         assert!(od
-            .check_if_region_free(&constraints[0].regions[0].region)
+            .check_if_region_free(&constraints[0].regions[0].region, None)
             .unwrap());
         assert!(!od
-            .check_if_region_free(&constraints[1].regions[0].region)
+            .check_if_region_free(&constraints[1].regions[0].region, None)
             .unwrap());
 
         // Try to reserve an occupied region

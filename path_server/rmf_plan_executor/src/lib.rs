@@ -157,7 +157,7 @@ impl PlanExecutor {
             let position = Isometry2::new(Vector2::new(current_x, current_y), 0.0);
             fw.update_position_estimate(&position, 0.5);
             let after = fw.get_semantic_waypoint().trajectory_index;
-            rclrs::log!(
+            rclrs::log_debug!(
                 self.node.logger(),
                 "[Executor Debug] Robot {} pos=({}, {}) index before={}, after={}",
                 robot_id,
@@ -190,7 +190,7 @@ impl PlanExecutor {
             .map(|w| w.trajectory_index)
             .unwrap_or(0);
 
-        rclrs::log!(
+        rclrs::log_debug!(
             self.node.logger(),
             "[Executor Debug] Robot {} curr_wp_idx={} (semantic waypoint trajectory index)",
             robot_id,
@@ -205,7 +205,7 @@ impl PlanExecutor {
                 if let Some(blocker_sem) = semantic_waypoints.get(&blocker.name) {
                     let blocker_progress = blocker_sem.trajectory_index;
                     let required_progress = blocker.required_progress.round() as usize;
-                    rclrs::log!(
+                    rclrs::log_debug!(
                         self.node.logger(),
                         "[Executor Debug] Blocker check for robot {} wp {}: blocker={} blocker_progress={} required={}",
                         robot_id,
@@ -219,7 +219,7 @@ impl PlanExecutor {
                         break;
                     }
                 } else {
-                    rclrs::log!(
+                    rclrs::log_debug!(
                         self.node.logger(),
                         "[Executor Debug] Blocker check for robot {} wp {}: blocker={} is missing semantic waypoint",
                         robot_id,
