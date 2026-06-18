@@ -516,8 +516,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
+                let error_topic = format!("{}/destination/error", robot_id);
                 let error_publisher = match server.node.create_publisher::<DestinationError>(
-                    &(robot_id.to_string() + "/destination/error"),
+                    error_topic.as_str().transient_local().reliable(),
                 ) {
                     Ok(pub_) => pub_,
                     Err(err) => {
@@ -539,7 +540,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Create the goal subscription on the destinations_worker thread context!
                 let subscription = match server.destinations_worker
                     .create_subscription::<DestinationGoal, _>(
-                        goal_topic.as_str(),
+                        goal_topic.as_str().transient_local().reliable(),
                         move |dest_server: &mut DestinationsServer, goal_msg: DestinationGoal| {
                             let domain_goal = DomainDestinationGoal::from_ros(&goal_msg);
                             rclrs::log!(
